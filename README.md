@@ -99,6 +99,31 @@ VPC 10.20.0.0/16 (ap-southeast-3)
 
 ## 4. Discovery oleh PANW (onboarding cloud account)
 
+### 4.0 Prasyarat onboarding AWS (dari dokumentasi PANW)
+
+Ringkasan *AWS Onboarding Prerequisites* dan status di lab ini:
+
+| Prasyarat | Untuk apa | Status di lab ini |
+|---|---|---|
+| S3 bucket di region yang sama dengan model AI | Tujuan VPC flow log dan log Bedrock | Di luar Terraform ini, siapkan sendiri bila perlu |
+| VPC Flow Logs subnet aplikasi ke S3 (format custom, semua atribut standar, partisi per 1 jam) | Discovery trafik aplikasi | Di luar Terraform ini |
+| Bedrock model invocation logging ke S3 | Discovery pemakaian model | Hanya bila memakai Bedrock |
+| EKS **Cluster authentication mode = EKS API and ConfigMap** | Container discovery | Default module EKS v20 (`API_AND_CONFIG_MAP`). Cek di bawah |
+| Endpoint EKS public mengizinkan **IP perimeter firewall PANW** sesuai region tenant | Container discovery dari cloud PANW | `eks_public_access_cidrs` default `0.0.0.0/0` sudah mencakup. Kalau dipersempit, tambahkan IP PANW dari halaman dokumentasi |
+| IAM role EC2 dengan `bedrock:InvokeModel` | VM memanggil model | Hanya bila VM memanggil Bedrock |
+| EKS Pod Identity association | Pod memanggil model | Hanya bila pod memanggil Bedrock |
+
+Cek mode autentikasi dan akses endpoint EKS:
+
+```bash
+aws eks describe-cluster --name airs-eks --region ap-southeast-3 \
+  --query 'cluster.[accessConfig.authenticationMode,resourcesVpcConfig.endpointPublicAccess,resourcesVpcConfig.publicAccessCidrs]'
+```
+
+Harus `API_AND_CONFIG_MAP`, `true`, dan CIDR yang mencakup IP PANW (atau `0.0.0.0/0`).
+
+> Daftar IP perimeter PANW tidak disalin ke sini karena bisa berubah. Ambil dari halaman dokumentasi. Region tenant SCM tidak selalu sama dengan region AWS (tenant lab ini `americas`).
+
 ### 4.1 Apa yang terjadi
 
 Saat account AWS di-onboard ke SCM (Prisma AIRS → cloud discovery), PANW membuat IAM role di account Anda dan memakainya dari cloud PANW untuk menemukan resource, termasuk cluster EKS.
@@ -583,6 +608,7 @@ Setelah destroy, deactivate lisensi firewall dan tag collector di SCM/CSP.
 - Secure VMs and Kubernetes Clusters in AWS (SCM): https://docs.paloaltonetworks.com/prisma-airs/ai-inventory/scm-config-protect-vms-k8s-aws
 - Deploy Prisma AIRS Network Intercept in AWS (overlay routing): https://docs.paloaltonetworks.com/prisma-airs/ai-runtime-security/airs-managed-saas-firewall/add-ai-instance-for-aws
 - Associate a VPC Endpoint with a VM-Series Interface: https://docs.paloaltonetworks.com/vm-series/deployment/public-cloud/set-up-the-vm-series-firewall-on-aws/vm-series-integration-with-gateway-load-balancer/associate-a-vpc-endpoint-with-a-vm-series-interface
+- AWS Onboarding Prerequisites: https://docs.paloaltonetworks.com/prisma-airs/ai-inventory/cloud-resource-discovery/onboard-and-activate-cloud-account-in-scm/aws-onboarding-prerequisites
 - Deploy a Tag Collector Agent on AWS: https://docs.paloaltonetworks.com/prisma-airs/ai-inventory/cloud-resource-discovery/private-cluster-discovery/deploy-a-tag-collector-agent-to-secure-private-clusters
 - Harvest IP-Tags from Kubernetes Clusters: https://docs.paloaltonetworks.com/prisma-airs/getting-started/use-case-harvesting-ip-tags-k8s-clusters
 - Service account untuk cluster authentication (CN-Series): https://docs.paloaltonetworks.com/cn-series/getting-started/cn-series-deployment-prereq/create-service-accounts-for-cluster-authentication-with-cn-series

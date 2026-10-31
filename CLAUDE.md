@@ -64,6 +64,7 @@ show object registered-ip all
 - **Cluster dibuat ulang** = hostname endpoint dan token SA berubah; kredensial di tag collector harus diperbarui.
 - **Template SCM tag collector** memakai TGW dan VPC `10.20.0.0/16` (overlap). Tidak dipakai; sudah diadaptasi ke satu VPC tanpa TGW. Nilai `authcodes`/PIN di template adalah placeholder huruf berulang.
 - **Discovery PANW** memakai role onboarding `airs-aws-logs_ip_tag` (sesi `cloud-ip-tag-k8s`, `ListClusters`/`DescribeCluster` tiap ±15 menit). Panggilan Kubernetes API tidak terlihat di CloudTrail.
+- **Container discovery dari cloud PANW** butuh EKS auth mode `API_AND_CONFIG_MAP` dan endpoint public yang mengizinkan IP perimeter PANW (lihat README 4.0). Kalau `eks_public_access_cidrs` dipersempit, discovery bisa putus.
 - **Konfigurasi DLP dari SCM** (`PII Basic Block All Data` → `DLP App Exclusion`) memunculkan error validasi di tag collector.
 
 ## Pertanyaan terbuka ke PANW
