@@ -12,7 +12,7 @@
 tc_instance_role_name = "<name_prefix>tc_vm01"
 
 tc_bootstrap_options = {
-  "authcodes" = "D1234567"
+  "authcodes" = "<AUTH_CODE>"
   "cdl-region" = "<from SCM template, e.g. americas>"
   "cluster-account-ids" = "{\"<DISCOVERY_ACCOUNT_ID>\":[\"<AWS_ACCOUNT_ID>\"]}"
   "dgname" = "AIRS-EKS-Jakarta"
@@ -29,6 +29,6 @@ tc_bootstrap_options = {
   "tplname" = "otid:<OTID>;label:CtxColl"
   "tsg-id" = "<TSG_ID>"
   "vm-auth-key" = ""
-  "vm-series-auto-registration-pin-id" = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-  "vm-series-auto-registration-pin-value" = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  "vm-series-auto-registration-pin-id" = "<PIN_ID>"
+  "vm-series-auto-registration-pin-value" = "<PIN_VALUE>"
 }

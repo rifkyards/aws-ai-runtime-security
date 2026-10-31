@@ -149,6 +149,10 @@ resource "aws_instance" "fw" {
     ignore_changes = [user_data]
 
     precondition {
+      condition     = !anytrue([for v in values(var.bootstrap_options) : can(regex("[<>]", v))])
+      error_message = "bootstrap_options still contains a placeholder like <AUTH_CODE> or <PIN_ID>: replace it with the real value."
+    }
+    precondition {
       condition     = lookup(var.bootstrap_options, "authcodes", "") != ""
       error_message = "bootstrap_options.authcodes is empty: set the Prisma AIRS auth code (deployment profile) in terraform.tfvars."
     }

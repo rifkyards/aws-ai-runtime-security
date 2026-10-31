@@ -38,7 +38,7 @@ bootstrap_options = {
   "dhcp-accept-server-hostname"           = "yes"
   "dhcp-accept-server-domain"             = "yes"
   "panorama-server"                       = "cloud" # Strata Cloud Manager
-  "authcodes"                             = "D1234567"     # auth code from the CSP deployment profile
-  "vm-series-auto-registration-pin-id"    = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-  "vm-series-auto-registration-pin-value" = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  "authcodes"                             = "<AUTH_CODE>"    # auth code from the CSP deployment profile
+  "vm-series-auto-registration-pin-id"    = "<PIN_ID>"
+  "vm-series-auto-registration-pin-value" = "<PIN_VALUE>"
 }

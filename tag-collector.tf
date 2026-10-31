@@ -316,6 +316,10 @@ resource "aws_instance" "tc" {
       error_message = "tc_bootstrap_options.plugin-op-commands must contain tag_collector_mode_flag:enable (copy it from the SCM template)."
     }
     precondition {
+      condition     = !anytrue([for v in values(var.tc_bootstrap_options) : can(regex("[<>]", v))])
+      error_message = "tc_bootstrap_options still contains a placeholder like <AUTH_CODE>, <PIN_ID> or <TSG_ID>: copy the real values from the SCM template."
+    }
+    precondition {
       condition = alltrue([for k in ["authcodes", "vm-series-auto-registration-pin-id", "vm-series-auto-registration-pin-value", "tsg-id", "tplname", "dgname", "discovery-account-id", "ip-tag-svc-endpoint"] :
       trimspace(lookup(var.tc_bootstrap_options, k, "")) != ""])
       error_message = "tc_bootstrap_options is missing SCM-generated values (authcodes, PIN, tsg-id, tplname, dgname, discovery-account-id, ip-tag-svc-endpoint)."
