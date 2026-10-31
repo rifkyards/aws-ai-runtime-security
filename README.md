@@ -404,15 +404,22 @@ Satu atribut per baris (versi satu baris dari dokumentasi menghasilkan `Invalid 
 
 ```
 configure
-set deviceconfig plugins kubernetes setup cluster-credentials airs-eks api-server-address <EKS_ENDPOINT_HOST>
-set deviceconfig plugins kubernetes setup cluster-credentials airs-eks cluster-type EKS
-set deviceconfig plugins kubernetes setup cluster-credentials airs-eks cluster-credential-file service-account-cred <BASE64>
-set deviceconfig plugins kubernetes setup cluster-credentials airs-eks labels no-labels
-set deviceconfig plugins kubernetes monitoring-definition airs-eks-mon cluster-credentials airs-eks
-set deviceconfig plugins kubernetes monitoring-definition airs-eks-mon enable yes
+set deviceconfig plugins kubernetes setup cluster-credentials <cluster_name> api-server-address <EKS_ENDPOINT_HOST>
+set deviceconfig plugins kubernetes setup cluster-credentials <cluster_name> cluster-type EKS
+set deviceconfig plugins kubernetes setup cluster-credentials <cluster_name> cluster-credential-file service-account-cred <BASE64>
+set deviceconfig plugins kubernetes setup cluster-credentials <cluster_name> labels no-labels
+set deviceconfig plugins kubernetes monitoring-definition <mon_def_name> cluster-credentials <cluster_name>
+set deviceconfig plugins kubernetes monitoring-definition <mon_def_name> enable yes
 commit
 exit
 ```
+
+| Placeholder | Arti | Saran nama | Contoh di lab ini |
+|---|---|---|---|
+| `<cluster_name>` | Nama entri kredensial cluster di tag collector | **Samakan dengan nama cluster EKS aslinya** (variabel Terraform `name`, yang dipakai di `aws eks ... --name`) supaya mudah dicocokkan | `airs-eks` |
+| `<mon_def_name>` | Monitoring definition, yaitu definisi pemantauan tag collector ke cluster EKS tersebut (satu per cluster). Namanya bebas | `<cluster_name>-mon` | `airs-eks-mon` |
+| `<EKS_ENDPOINT_HOST>` | Hostname API server EKS tanpa `https://`. Ini yang menentukan cluster mana yang dibaca | dari `aws eks describe-cluster` | |
+| `<BASE64>` | `cred.json` (secret SA) yang di-gzip lalu base64 | dari langkah 8.4 | |
 
 ```
 show plugins kubernetes status
@@ -428,9 +435,9 @@ Paksa polling ulang (setelah RBAC diperbaiki):
 
 ```
 configure
-set deviceconfig plugins kubernetes monitoring-definition airs-eks-mon enable no
+set deviceconfig plugins kubernetes monitoring-definition <mon_def_name> enable no
 commit
-set deviceconfig plugins kubernetes monitoring-definition airs-eks-mon enable yes
+set deviceconfig plugins kubernetes monitoring-definition <mon_def_name> enable yes
 commit
 ```
 
