@@ -1,0 +1,44 @@
+# Copy to terraform.tfvars and fill in. Never commit the real file (it holds the auth code and PIN).
+
+region = "ap-southeast-3" # Jakarta
+name   = "airs-eks"
+
+# Your public IP / VPN egress. Used for the firewall GUI/SSH and the EKS API.
+admin_cidrs = ["203.0.113.10/32"]
+
+# Existing EC2 key pair in ap-southeast-3
+ssh_key_name = "my-keypair"
+
+# Prisma AIRS firewall AMI (must exist in ap-southeast-3, Marketplace subscribed)
+fw_ami_id        = "ami-0ac089e9d177c663d"
+fw_instance_type = "m5.xlarge"
+
+# Optional overrides (defaults shown)
+# vpc_cidr               = "10.20.0.0/16"
+# inspection_subnet_cidr = "10.20.250.0/28"
+# mgmt_subnet_cidr       = "10.20.251.0/28"
+# fw_data_ip             = "10.20.250.10"
+# kubernetes_version     = "1.34"
+
+# GWLB + GWLB endpoint in front of the firewall (PAN CNI endpoint = GWLBE IP)
+# enable_gwlb       = true
+# gwlbe_subnet_cidr = "10.20.252.0/28"
+
+# EKS public API access (Terraform Helm provider + kubectl). Tighten to your IP.
+# eks_public_access_cidrs = ["203.0.113.10/32"]
+
+bootstrap_options = {
+  "mgmt-interface-swap"                   = "disable"
+  "plugin-op-commands"                    = "advance-routing:enable,aws-gwlb-inspect:enable" # never aws-gwlb-overlay-routing (single-arm)
+  "vm-auth-key"                           = ""                       # Panorama only; leave empty for SCM
+  "dgname"                                = "AIRS-EKS-Jakarta"       # SCM folder name
+  "tplname"                               = ""                       # SCM-generated value (otid:...) if provided
+  "dhcp-send-hostname"                    = "yes"
+  "dhcp-send-client-id"                   = "yes"
+  "dhcp-accept-server-hostname"           = "yes"
+  "dhcp-accept-server-domain"             = "yes"
+  "panorama-server"                       = "cloud" # Strata Cloud Manager
+  "authcodes"                             = "D1234567"     # auth code from the CSP deployment profile
+  "vm-series-auto-registration-pin-id"    = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  "vm-series-auto-registration-pin-value" = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+}

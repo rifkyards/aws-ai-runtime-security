@@ -1,0 +1,34 @@
+# Copy to tag-collector.auto.tfvars and fill in. Never commit the real file.
+#
+# Take every value from the SCM-generated tag collector template
+# (<alias>_AGENT_AWS_<REGION>_<id>/architecture/tc_project/terraform.tfvars,
+#  block vmseries.tc.bootstrap_options). Do NOT change tenant IDs (tsg-id, tplname,
+# discovery-account-id, cluster-account-ids, ip-tag-svc-endpoint, cdl-region).
+# The SCM template masks authcodes and the PIN with repeated letters: replace them
+# with real values (the firewall's ones work if the profile has capacity).
+
+# IAM role name of the TC VM: use <name_prefix>tc_vm01 from the SCM template
+# (tc_iam_project trusted_role_arn).
+tc_instance_role_name = "<name_prefix>tc_vm01"
+
+tc_bootstrap_options = {
+  "authcodes" = "D1234567"
+  "cdl-region" = "<from SCM template, e.g. americas>"
+  "cluster-account-ids" = "{\"<DISCOVERY_ACCOUNT_ID>\":[\"<AWS_ACCOUNT_ID>\"]}"
+  "dgname" = "AIRS-EKS-Jakarta"
+  "dhcp-accept-server-domain" = "yes"
+  "dhcp-accept-server-hostname" = "yes"
+  "dhcp-send-client-id" = "yes"
+  "dhcp-send-hostname" = "yes"
+  "discovery-account-id" = "<DISCOVERY_ACCOUNT_ID>"
+  "ip-tag-svc-endpoint" = "<from SCM template, e.g. cloud-ip-tag-gateway-service.<region>.apps.paloaltonetworks.com>"
+  "mgmt-interface-swap" = "disable"
+  "panorama-server" = "cloud"
+  "plugin-op-commands" = "tag_collector_mode_flag:enable,advance-routing:enable"
+  "ssh-keys" = "admin:<your-keypair>"
+  "tplname" = "otid:<OTID>;label:CtxColl"
+  "tsg-id" = "<TSG_ID>"
+  "vm-auth-key" = ""
+  "vm-series-auto-registration-pin-id" = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  "vm-series-auto-registration-pin-value" = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+}

@@ -1,0 +1,63 @@
+# Demo workload to test inspection.
+# 1) kubectl apply -f k8s/demo.yaml            -> baseline, NOT inspected yet
+# 2) kubectl annotate namespace airs-demo paloaltonetworks.com/firewall=pan-fw
+# 3) kubectl rollout restart deployment -n airs-demo   -> now inspected
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: airs-demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: airs-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: web }
+  template:
+    metadata:
+      labels: { app: web }
+    spec:
+      # spread across both AZs/nodes so cross-node traffic is tested
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: web }
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: airs-demo
+spec:
+  selector: { app: web }
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client
+  namespace: airs-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: client }
+  template:
+    metadata:
+      labels: { app: client }
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:8.11.1
+          command: ["sh", "-c", "sleep infinity"]

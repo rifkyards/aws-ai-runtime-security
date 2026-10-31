@@ -1,0 +1,152 @@
+# Prisma AIRS demo: semua resource dalam satu file.
+#
+#   kubectl apply -f k8s/airs-demo-all.yaml
+#
+# Kedua namespace sudah ber-annotation paloaltonetworks.com/firewall=pan-fw,
+# jadi pod langsung dibelokkan PAN CNI ke firewall sejak dibuat (tidak perlu restart).
+#
+#   airs-demo    : client (curl), web (nginx :80, 2 replika disebar ke node berbeda),
+#                  Service web (ClusterIP :80), web-direct (headless :80)
+#   airs-demo-b  : web2 (nginx :81), Service web2 (ClusterIP :81), web2-direct (headless :81)
+#
+# ClusterIP (web, web2) dan headless (web-direct, web2-direct) sama-sama lewat firewall.
+# Headless: DNS langsung mengembalikan IP pod, jadi di log FW tujuan = IP pod.
+#
+# Catatan: kalau Service web2 pernah dibuat manual (kubectl expose --port 80),
+# hapus dulu (kubectl -n airs-demo-b delete svc web2) sebelum apply file ini,
+# supaya port 80 lama tidak digabung dengan port 81.
+#
+# Filter di Traffic log firewall:
+#   web  -> ( port.dst eq 80 ) and ( addr.src neq 10.20.250.12 )   (.12 = health check GWLB)
+#   web2 -> ( port.dst eq 81 )
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: airs-demo
+  annotations:
+    paloaltonetworks.com/firewall: pan-fw
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: airs-demo-b
+  annotations:
+    paloaltonetworks.com/firewall: pan-fw
+---
+# ---------------------------------------------------------------- airs-demo: web :80
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: airs-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: web }
+  template:
+    metadata:
+      labels: { app: web }
+    spec:
+      # satu replika per node supaya trafik lintas node ikut teruji
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: web }
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: airs-demo
+spec:
+  selector: { app: web }
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# headless: DNS langsung mengembalikan IP pod (tanpa ClusterIP)
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-direct
+  namespace: airs-demo
+spec:
+  clusterIP: None
+  selector: { app: web }
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# ---------------------------------------------------------------- airs-demo: client
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client
+  namespace: airs-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: client }
+  template:
+    metadata:
+      labels: { app: client }
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:8.11.1
+          command: ["sh", "-c", "sleep infinity"]
+---
+# ---------------------------------------------------------------- airs-demo-b: web2 :81
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web2
+  namespace: airs-demo-b
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: web2 }
+  template:
+    metadata:
+      labels: { app: web2 }
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          # nginx default listen 80 -> diganti 81, supaya port di log FW konsisten 81
+          # (PAN CNI membelokkan paket sebelum translasi Service)
+          command: ["sh", "-c", "sed -i 's/80;/81;/g' /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"]
+          ports:
+            - containerPort: 81
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web2
+  namespace: airs-demo-b
+spec:
+  selector: { app: web2 }
+  ports:
+    - port: 81
+      targetPort: 81
+---
+# headless: DNS langsung mengembalikan IP pod web2 (tanpa ClusterIP)
+apiVersion: v1
+kind: Service
+metadata:
+  name: web2-direct
+  namespace: airs-demo-b
+spec:
+  clusterIP: None
+  selector: { app: web2 }
+  ports:
+    - port: 81
+      targetPort: 81

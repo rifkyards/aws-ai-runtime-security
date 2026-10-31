@@ -1,0 +1,35 @@
+# ---- Terraform state & local data (contain IDs, IPs, and sometimes secrets)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# ---- Variable files with credentials (auth code, PIN, tenant IDs)
+# Commit only the *.example files.
+terraform.tfvars
+*.auto.tfvars
+*.auto.tfvars.json
+*.tfvars.json
+!*.tfvars.example
+
+# ---- Kubernetes / AWS credentials produced while following the README
+cred*.json
+aws-cred*
+trust-*.json
+helper-userdata.sh
+kubeconfig*
+*.pem
+*.key
+
+# ---- OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

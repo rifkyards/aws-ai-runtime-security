@@ -1,0 +1,23 @@
+# Default values for ai-runtime-security.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# FW Trust Interface IP Address fro OnPrem
+endpoints: ""
+
+# PAN CNI image.
+cniimage: gcr.io/pan-cn-series/airs/pan-cni:4.0.0
+
+# AI firewall trust cidr. This field is optional.
+# Helps in reducing hops in East-West cluster traffic.
+fwtrustcidr: ""
+
+# Resource namespace name.
+namespace: kube-system
+
+# Kubernetes ClusterID value range 1-2048.
+clusterid: 1
+
+# The K8s environment 
+# Valid deployTo tags are: [gke|eks|aks|openshift|native]
+deployTo: "native"

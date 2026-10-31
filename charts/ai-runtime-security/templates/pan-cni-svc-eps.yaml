@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pan-ngfw-svc
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: pan-ngfw-svc
+spec:
+  ports:
+    - protocol: UDP
+      port: 6080
+      targetPort: 6080
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: pan-ngfw-svc-endpoints
+  namespace: {{ .Values.namespace }}
+  labels:
+    kubernetes.io/service-name: pan-ngfw-svc
+addressType: IPv4
+ports:
+  - name: ''
+    protocol: UDP
+    port: 6080
+endpoints:
+  - addresses:
+      - {{ .Values.endpoints }}
