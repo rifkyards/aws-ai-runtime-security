@@ -1,41 +1,41 @@
-# Prisma AIRS + EKS (Jakarta): Firewall, GWLB, PAN CNI, dan IP-Tag Collector
+# Prisma AIRS + EKS (Jakarta): Firewall, GWLB, PAN CNI, and IP-Tag Collector
 
-Lab PoC di `ap-southeast-3`: satu VPC berisi cluster EKS, firewall **Prisma AIRS AI Runtime** di subnet samping, **GWLB + GWLB endpoint**, **PAN CNI** (CNI chaining) yang membelokkan trafik pod ke firewall, dan **IP-tag collector** (Context Collector Agent) yang mengirim tag Kubernetes ke firewall untuk Dynamic Address Group.
+PoC lab in `ap-southeast-3`: one VPC with an EKS cluster, a **Prisma AIRS AI Runtime** firewall in a side subnet, a **GWLB + GWLB endpoint**, **PAN CNI** (CNI chaining) steering pod traffic to the firewall, and an **IP-tag collector** (Context Collector Agent) that sends Kubernetes tags to the firewall for Dynamic Address Groups.
 
-> **Credentials tidak ada di repo.** `terraform.tfvars`, `tag-collector.auto.tfvars`, state Terraform, dan file kredensial yang dibuat saat mengikuti README (`cred*.json`, `aws-cred*`) di-ignore oleh `.gitignore`. Mulai dari file `*.example`.
+> **No credentials in this repo.** `terraform.tfvars`, `tag-collector.auto.tfvars`, Terraform state, and the credential files created while following this README (`cred*.json`, `aws-cred*`) are excluded by `.gitignore`. Start from the `*.example` files.
 >
-> **Redaksi.** Nilai sensitif atau spesifik tenant ditulis sebagai placeholder: `<ACCOUNT_ID>`, `<TSG_ID>`, `<DISCOVERY_ACCOUNT_ID>`, `<OTID>`, `<EKS_ENDPOINT_HOST>`, `<FW_MGMT_EIP>`, `<TC_MGMT_EIP>`, `<NAT_EIP>`, `<VPCE_ID>`, `<ADMIN_IP>`. Auth code, PIN, token, dan isi `*.tfvars` tidak pernah ditulis di sini. Isi nilai aslinya di `terraform.tfvars` / `tag-collector.auto.tfvars` (jangan di-commit ke repo publik).
+> **Redaction.** Sensitive or tenant-specific values are written as placeholders: `<ACCOUNT_ID>`, `<TSG_ID>`, `<DISCOVERY_ACCOUNT_ID>`, `<OTID>`, `<EKS_ENDPOINT_HOST>`, `<FW_MGMT_EIP>`, `<TC_MGMT_EIP>`, `<NAT_EIP>`, `<VPCE_ID>`, `<ADMIN_IP>`. Auth codes, PINs, tokens, and the contents of `*.tfvars` are never written here. Put the real values in `terraform.tfvars` / `tag-collector.auto.tfvars` (do not commit them to a public repo).
 
 ![HLD](docs/airs-eks-gwlb-tc.png)
 
 ---
 
-## Daftar isi
+## Table of contents
 
-1. [Arsitektur](#1-arsitektur)
-2. [Isi folder](#2-isi-folder)
-3. [Prasyarat](#3-prasyarat)
-4. [Discovery oleh PANW (onboarding cloud account)](#4-discovery-oleh-panw-onboarding-cloud-account)
-5. [Infrastruktur (Terraform)](#5-infrastruktur-terraform)
-6. [Firewall Prisma AIRS](#6-firewall-prisma-airs)
-7. [PAN CNI dan uji trafik](#7-pan-cni-dan-uji-trafik)
+1. [Architecture](#1-architecture)
+2. [Repository contents](#2-repository-contents)
+3. [Prerequisites](#3-prerequisites)
+4. [PANW discovery (cloud account onboarding)](#4-panw-discovery-cloud-account-onboarding)
+5. [Infrastructure (Terraform)](#5-infrastructure-terraform)
+6. [Prisma AIRS firewall](#6-prisma-airs-firewall)
+7. [PAN CNI and traffic tests](#7-pan-cni-and-traffic-tests)
 8. [IP-Tag Collector](#8-ip-tag-collector)
-9. [Dynamic Address Group (DAG)](#9-dynamic-address-group-dag)
-10. [Temuan dan batasan](#10-temuan-dan-batasan)
+9. [Dynamic Address Groups (DAG)](#9-dynamic-address-groups-dag)
+10. [Findings and limitations](#10-findings-and-limitations)
 11. [Troubleshooting](#11-troubleshooting)
-12. [Hapus / rollback](#12-hapus--rollback)
-13. [Referensi](#13-referensi)
+12. [Teardown / rollback](#12-teardown--rollback)
+13. [References](#13-references)
 
 ---
 
-## 1. Arsitektur
+## 1. Architecture
 
 ```
 VPC 10.20.0.0/16 (ap-southeast-3)
 │
-├─ private-a 10.20.0.0/20 (AZ-a) ┐ Node EKS (managed node group)
+├─ private-a 10.20.0.0/20 (AZ-a) ┐ EKS nodes (managed node group)
 ├─ private-b 10.20.16.0/20 (AZ-b)┘   Pod ─► AWS VPC CNI ─► pan-cni (chained, DaemonSet)
-│                                                      │ ke pan-ngfw-svc = GWLBE
+│                                                      │ to pan-ngfw-svc = GWLBE
 │                                                      ▼
 ├─ gwlbe 10.20.252.0/28 (AZ-a)     GWLB endpoint 10.20.252.4
 │                                                      │
@@ -43,100 +43,100 @@ VPC 10.20.0.0/16 (ap-southeast-3)
 │
 ├─ mgmt 10.20.251.0/28 (AZ-a)      FW eth0 10.20.251.10 + EIP ─► SCM
 │                                   Tag collector 10.20.251.11 + EIP
-│                                     ├─ HTTPS 443 ─► EKS API (private endpoint, token SA)
-│                                     └─◄ 5007 ── FW eth0 menarik IP-tag (User-ID redistribution)
+│                                     ├─ HTTPS 443 ─► EKS API (private endpoint, SA token)
+│                                     └─◄ 5007 ── FW eth0 pulls IP-tags (User-ID redistribution)
 │
 └─ public-a/b 10.20.100.0/24, 10.20.101.0/24 (NAT GW, IGW)
 ```
 
-| Komponen | Subnet / IP | Fungsi |
+| Component | Subnet / IP | Role |
 |---|---|---|
-| Node EKS | private-a / private-b | Menjalankan pod. PAN CNI membelokkan trafik pod dari namespace ber-annotation |
-| GWLB endpoint | `10.20.252.4` | Tujuan `pan-ngfw-svc` (endpoint PAN CNI) |
-| GWLB | inspection | Meneruskan ke firewall via GENEVE 6081, health check TCP 443 |
-| Firewall eth1 (`ethernet1/1`) | `10.20.250.10` | Interface data, terminasi GENEVE |
-| Firewall eth0 | `10.20.251.10` + `<FW_MGMT_EIP>` | Management, koneksi ke SCM |
-| Tag collector | `10.20.251.11` + `<TC_MGMT_EIP>` | Membaca EKS, membuat IP-tag, membagikannya ke firewall |
+| EKS nodes | private-a / private-b | Run pods. PAN CNI steers traffic from annotated namespaces |
+| GWLB endpoint | `10.20.252.4` | Target of `pan-ngfw-svc` (PAN CNI endpoint) |
+| GWLB | inspection | Forwards to the firewall over GENEVE 6081, health check TCP 443 |
+| Firewall eth1 (`ethernet1/1`) | `10.20.250.10` | Data interface, terminates GENEVE |
+| Firewall eth0 | `10.20.251.10` + `<FW_MGMT_EIP>` | Management, connection to SCM |
+| Tag collector | `10.20.251.11` + `<TC_MGMT_EIP>` | Reads EKS, builds IP-tags, shares them with the firewall |
 
 ---
 
-## 2. Isi folder
+## 2. Repository contents
 
-| File | Isi |
+| File | Contents |
 |---|---|
-| `versions.tf`, `variables.tf`, `outputs.tf` | Provider, variabel, output |
-| `network.tf` | VPC, subnet node/public, NAT GW, subnet inspection + mgmt |
-| `eks.tf` | Cluster EKS, managed node group, rule SG node (pod-to-pod semua port, dari firewall) |
-| `firewall.tf` | SG, ENI eth0/eth1, EIP mgmt, EC2 firewall + bootstrap |
-| `gwlb.tf` | Subnet GWLBE, GWLB, target group GENEVE, endpoint service, GWLB endpoint |
-| `pan-cni.tf` | Helm release PAN CNI (`endpoints` = IP GWLBE) |
-| `tag-collector.tf` | EC2 tag collector, IAM (dari template SCM), EKS access entry, SG 443 ke EKS API dan 5007 dari firewall |
-| `tag-collector.auto.tfvars.example` | Contoh `tc_bootstrap_options` (salin ke `tag-collector.auto.tfvars`, yang di-ignore git) |
-| `gwlb-test.tf` | Opsional: EC2 uji trafik GWLB normal (route table) |
-| `scp-helper.tf` | Opsional: EC2 sementara sumber `scp import` untuk tag collector |
-| `charts/ai-runtime-security/` | Chart resmi `PaloAltoNetworks/prisma-airs-helm` (MIT) |
-| `k8s/airs-demo-all.yaml` | Demo: ns `airs-demo` + `airs-demo-b` (ber-annotation), web :80, web2 :81, client |
-| `k8s/test.sh` | Uji 6 skenario, ringkasan PASS/FAIL |
-| `k8s/tag-collector-serviceaccount.yaml` | ServiceAccount + RBAC untuk tag collector (versi PANW + izin tambahan) |
-| `terraform.tfvars.example` | Contoh variabel utama (salin ke `terraform.tfvars`, yang di-ignore git) |
-| `.gitignore` | Mengecualikan state, tfvars asli, kredensial (`cred*.json`, `aws-cred*`, `*.pem`) |
-| `docs/airs-eks-gwlb-tc.png` | Diagram HLD |
+| `versions.tf`, `variables.tf`, `outputs.tf` | Providers, variables, outputs |
+| `network.tf` | VPC, node/public subnets, NAT GW, inspection + mgmt subnets |
+| `eks.tf` | EKS cluster, managed node group, node SG rules (all-port pod-to-pod, from the firewall) |
+| `firewall.tf` | SGs, eth0/eth1 ENIs, mgmt EIP, firewall EC2 + bootstrap |
+| `gwlb.tf` | GWLBE subnet, GWLB, GENEVE target group, endpoint service, GWLB endpoint |
+| `pan-cni.tf` | PAN CNI Helm release (`endpoints` = GWLBE IP) |
+| `tag-collector.tf` | Tag collector EC2, IAM (from the SCM template), EKS access entries, SG 443 to the EKS API and 5007 from the firewall |
+| `tag-collector.auto.tfvars.example` | Example `tc_bootstrap_options` (copy to `tag-collector.auto.tfvars`, which git ignores) |
+| `gwlb-test.tf` | Optional: test EC2 for regular GWLB traffic (route table) |
+| `scp-helper.tf` | Optional: temporary EC2 used as the `scp import` source for the tag collector |
+| `charts/ai-runtime-security/` | Official `PaloAltoNetworks/prisma-airs-helm` chart (MIT) |
+| `k8s/airs-demo-all.yaml` | Demo: ns `airs-demo` + `airs-demo-b` (annotated), web :80, web2 :81, client |
+| `k8s/test.sh` | 6 test scenarios, PASS/FAIL summary |
+| `k8s/tag-collector-serviceaccount.yaml` | ServiceAccount + RBAC for the tag collector (PANW version + extra permissions) |
+| `terraform.tfvars.example` | Example main variables (copy to `terraform.tfvars`, which git ignores) |
+| `.gitignore` | Excludes state, real tfvars, credentials (`cred*.json`, `aws-cred*`, `*.pem`) |
+| `docs/airs-eks-gwlb-tc.png` | HLD diagram |
 
 ---
 
-## 3. Prasyarat
+## 3. Prerequisites
 
-- [ ] Region Jakarta (`ap-southeast-3`) sudah di-enable di akun AWS
-- [ ] Subscribe image Prisma AIRS di AWS Marketplace (`ami-0ac089e9d177c663d`, PAN-OS 12.2.3)
-- [ ] EC2 key pair di `ap-southeast-3`
-- [ ] Auth code (deployment profile) dan Device Certificate PIN ID + value
-- [ ] Folder di Strata Cloud Manager (contoh: `AIRS-EKS-Jakarta`)
-- [ ] Cloud account AWS sudah di-onboard di SCM (lihat bagian 4)
+- [ ] Jakarta region (`ap-southeast-3`) enabled in the AWS account
+- [ ] Prisma AIRS image subscribed in AWS Marketplace (`ami-0ac089e9d177c663d`, PAN-OS 12.2.3)
+- [ ] EC2 key pair in `ap-southeast-3`
+- [ ] Auth code (deployment profile) and Device Certificate PIN ID + value
+- [ ] Strata Cloud Manager folder (example: `AIRS-EKS-Jakarta`)
+- [ ] AWS cloud account onboarded in SCM (see section 4)
 - [ ] Terraform ≥ 1.5, AWS CLI v2, kubectl, helm
-- [ ] IP publik Anda untuk `admin_cidrs` (`<ADMIN_IP>/32`)
+- [ ] Your public IP for `admin_cidrs` (`<ADMIN_IP>/32`)
 
 ---
 
-## 4. Discovery oleh PANW (onboarding cloud account)
+## 4. PANW discovery (cloud account onboarding)
 
-### 4.0 Prasyarat onboarding AWS (dari dokumentasi PANW)
+### 4.0 AWS onboarding prerequisites (from the PANW docs)
 
-Ringkasan *AWS Onboarding Prerequisites* dan status di lab ini:
+Summary of *AWS Onboarding Prerequisites* and their status in this lab:
 
-| Prasyarat | Untuk apa | Status di lab ini |
+| Prerequisite | Purpose | Status in this lab |
 |---|---|---|
-| S3 bucket di region yang sama dengan model AI | Tujuan VPC flow log dan log Bedrock | Di luar Terraform ini, siapkan sendiri bila perlu |
-| VPC Flow Logs subnet aplikasi ke S3 (format custom, semua atribut standar, partisi per 1 jam) | Discovery trafik aplikasi | Di luar Terraform ini |
-| Bedrock model invocation logging ke S3 | Discovery pemakaian model | Hanya bila memakai Bedrock |
-| EKS **Cluster authentication mode = EKS API and ConfigMap** | Container discovery | Default module EKS v20 (`API_AND_CONFIG_MAP`). Cek di bawah |
-| Endpoint EKS public mengizinkan **IP perimeter firewall PANW** sesuai region tenant | Container discovery dari cloud PANW | `eks_public_access_cidrs` default `0.0.0.0/0` sudah mencakup. Kalau dipersempit, tambahkan IP PANW dari halaman dokumentasi |
-| IAM role EC2 dengan `bedrock:InvokeModel` | VM memanggil model | Hanya bila VM memanggil Bedrock |
-| EKS Pod Identity association | Pod memanggil model | Hanya bila pod memanggil Bedrock |
+| S3 bucket in the same region as the AI models | Destination for VPC flow logs and Bedrock logs | Outside this Terraform, prepare it if needed |
+| VPC Flow Logs for the application subnet to S3 (custom format, all standard attributes, 1-hour partitions) | Application traffic discovery | Outside this Terraform |
+| Bedrock model invocation logging to S3 | Model usage discovery | Only if Bedrock is used |
+| EKS **Cluster authentication mode = EKS API and ConfigMap** | Container discovery | EKS module v20 default (`API_AND_CONFIG_MAP`). Check below |
+| Public EKS endpoint allows the **PANW perimeter firewall IPs** for the tenant region | Container discovery from the PANW cloud | `eks_public_access_cidrs` default `0.0.0.0/0` already covers it. If you narrow it, add the PANW IPs from the docs page |
+| EC2 IAM role with `bedrock:InvokeModel` | VMs calling models | Only if VMs call Bedrock |
+| EKS Pod Identity association | Pods calling models | Only if pods call Bedrock |
 
-Cek mode autentikasi dan akses endpoint EKS:
+Check the EKS authentication mode and endpoint access:
 
 ```bash
 aws eks describe-cluster --name airs-eks --region ap-southeast-3 \
   --query 'cluster.[accessConfig.authenticationMode,resourcesVpcConfig.endpointPublicAccess,resourcesVpcConfig.publicAccessCidrs]'
 ```
 
-Harus `API_AND_CONFIG_MAP`, `true`, dan CIDR yang mencakup IP PANW (atau `0.0.0.0/0`).
+Expected: `API_AND_CONFIG_MAP`, `true`, and CIDRs that cover the PANW IPs (or `0.0.0.0/0`).
 
-> Daftar IP perimeter PANW tidak disalin ke sini karena bisa berubah. Ambil dari halaman dokumentasi. Region tenant SCM tidak selalu sama dengan region AWS (tenant lab ini `americas`).
+> The PANW perimeter IP list is not copied here because it can change. Take it from the docs page. The SCM tenant region is not always the same as the AWS region (this lab's tenant is `americas`).
 
-### 4.1 Apa yang terjadi
+### 4.1 What happens
 
-Saat account AWS di-onboard ke SCM (Prisma AIRS → cloud discovery), PANW membuat IAM role di account Anda dan memakainya dari cloud PANW untuk menemukan resource, termasuk cluster EKS.
+When an AWS account is onboarded to SCM (Prisma AIRS → cloud discovery), PANW creates IAM roles in your account and uses them from the PANW cloud to discover resources, including EKS clusters.
 
-Teramati di CloudTrail:
+Observed in CloudTrail:
 
-| Role | Sesi | Panggilan | Frekuensi |
+| Role | Session | Calls | Frequency |
 |---|---|---|---|
-| `arn:aws:iam::<ACCOUNT_ID>:role/airs-aws-logs_ip_tag` | `cloud-ip-tag-k8s` | `eks:ListClusters`, `eks:DescribeCluster` | ± tiap 15 menit |
+| `arn:aws:iam::<ACCOUNT_ID>:role/airs-aws-logs_ip_tag` | `cloud-ip-tag-k8s` | `eks:ListClusters`, `eks:DescribeCluster` | about every 15 minutes |
 
-Access entry EKS yang ada untuk role onboarding: `role/airs-aws-logs`. Role `airs-aws-logs_ip_tag` **tidak** punya access entry.
+EKS access entry present for the onboarding role: `role/airs-aws-logs`. The `airs-aws-logs_ip_tag` role has **no** access entry.
 
-### 4.2 Cek sendiri
+### 4.2 Check it yourself
 
 ```bash
 aws cloudtrail lookup-events --region ap-southeast-3 \
@@ -146,41 +146,41 @@ aws cloudtrail lookup-events --region ap-southeast-3 \
 aws eks list-access-entries --cluster-name airs-eks --region ap-southeast-3 --output table
 ```
 
-> Panggilan ke Kubernetes API (list pod, dsb.) tidak tercatat di CloudTrail. Untuk melihatnya, aktifkan EKS audit log.
+> Kubernetes API calls (listing pods, etc.) are not recorded in CloudTrail. Enable EKS audit logs to see them.
 
-### 4.3 Template "Context Collector Agent" dari SCM
+### 4.3 SCM "Context Collector Agent" template
 
-SCM men-generate Terraform tag collector (`<alias>_AGENT_AWS_AP-SOUTHEAST-3_<id>`, `firewallType: Context Collector Agent`) berisi tiga project: `tgw_project`, `tc_project`, `tc_iam_project`. Project ini **tidak** dipakai langsung. Bagian yang relevan sudah diadaptasi ke `tag-collector.tf` (lihat bagian 8).
+SCM generates tag collector Terraform (`<alias>_AGENT_AWS_AP-SOUTHEAST-3_<id>`, `firewallType: Context Collector Agent`) with three projects: `tgw_project`, `tc_project`, `tc_iam_project`. These projects are **not** used directly. The relevant parts are adapted into `tag-collector.tf` (see section 8).
 
 ---
 
-## 5. Infrastruktur (Terraform)
+## 5. Infrastructure (Terraform)
 
-### 5.1 Isi variabel
+### 5.1 Variables
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
 ```
 
-Isi `admin_cidrs`, `ssh_key_name`, dan `bootstrap_options` (`dgname`, `authcodes`, PIN). File ini di-ignore git.
+Fill in `admin_cidrs`, `ssh_key_name`, and `bootstrap_options` (`dgname`, `authcodes`, PIN). Git ignores this file.
 
-| Key `bootstrap_options` | Nilai | Catatan |
+| `bootstrap_options` key | Value | Notes |
 |---|---|---|
-| `panorama-server` | `cloud` | Dikelola SCM |
-| `dgname` | `AIRS-EKS-Jakarta` | Folder SCM |
-| `tplname` | `otid:<OTID>` | Dari SCM |
-| `plugin-op-commands` | `advance-routing:enable` | Jangan `aws-gwlb-overlay-routing` (desain satu kaki) |
+| `panorama-server` | `cloud` | Managed by SCM |
+| `dgname` | `AIRS-EKS-Jakarta` | SCM folder |
+| `tplname` | `otid:<OTID>` | From SCM |
+| `plugin-op-commands` | `advance-routing:enable` | Never `aws-gwlb-overlay-routing` (single-arm design) |
 | `mgmt-interface-swap` | `disable` | eth0 = mgmt, eth1 = ethernet1/1 |
-| `authcodes`, `vm-series-auto-registration-pin-id`, `-pin-value` | wajib | Dicek precondition |
+| `authcodes`, `vm-series-auto-registration-pin-id`, `-pin-value` | required | Checked by preconditions |
 
-Variabel penting lain: `enable_gwlb = true` (default), `eks_public_access_cidrs`, `install_pan_cni`, `cluster_id`.
+Other important variables: `enable_gwlb = true` (default), `eks_public_access_cidrs`, `install_pan_cni`, `cluster_id`.
 
 ### 5.2 Deploy
 
 ```bash
 terraform init
 terraform plan -out tfplan
-terraform apply tfplan          # ±20–25 menit
+terraform apply tfplan          # about 20–25 minutes
 ```
 
 ```bash
@@ -188,17 +188,17 @@ $(terraform output -raw kubeconfig_command)
 ```
 
 ```bash
-terraform output pan_cni_endpoint      # harus IP GWLBE (10.20.252.4)
+terraform output pan_cni_endpoint      # must be the GWLBE IP (10.20.252.4)
 terraform output fw_mgmt_public_ip
 ```
 
 ---
 
-## 6. Firewall Prisma AIRS
+## 6. Prisma AIRS firewall
 
-### 6.1 Tunggu firewall muncul di SCM
+### 6.1 Wait for the firewall to appear in SCM
 
-10–20 menit setelah instance jalan. Cek di SCM (Cloud Managed Devices) atau via SSH:
+10–20 minutes after the instance starts. Check in SCM (Cloud Managed Devices) or over SSH:
 
 ```bash
 ssh -i <key>.pem admin@<FW_MGMT_EIP>
@@ -209,24 +209,24 @@ show system bootstrap status
 show panorama-status
 ```
 
-### 6.2 Interface, zone, routing (SCM, folder `AIRS-EKS-Jakarta`)
+### 6.2 Interfaces, zones, routing (SCM, folder `AIRS-EKS-Jakarta`)
 
-Konfigurasi yang terbukti jalan (single-arm GWLB):
+Configuration proven to work (single-arm GWLB):
 
-| Objek | Nilai |
+| Object | Value |
 |---|---|
-| `ethernet1/1` | Layer3, **DHCP client** (dapat `10.20.250.10`), zone `LAN`, logical router `default` |
-| Interface management profile | `healthcheck` dengan **HTTPS** (untuk health check GWLB TCP 443) |
-| Logical router | `default` (advanced routing), default route dari DHCP |
-| Security policy | Tidak diubah untuk PoC. Trafik pod-to-pod cocok `intrazone-default` (allow) atau rule uji |
+| `ethernet1/1` | Layer3, **DHCP client** (gets `10.20.250.10`), zone `LAN`, logical router `default` |
+| Interface management profile | `healthcheck` with **HTTPS** (for the GWLB TCP 443 health check) |
+| Logical router | `default` (advanced routing), default route from DHCP |
+| Security policy | Unchanged for the PoC. Pod-to-pod traffic matches `intrazone-default` (allow) or a test rule |
 
-Push Config, lalu cek:
+Push Config, then check:
 
 ```
 show interface ethernet1/1
 ```
 
-### 6.3 Plugin GWLB
+### 6.3 GWLB plugin
 
 ```
 request plugins vm_series aws gwlb inspect enable yes
@@ -240,16 +240,16 @@ request plugins vm_series aws gwlb overlay-routing enable no
 show plugins vm_series aws gwlb
 ```
 
-Harus `GWLB enabled: True`, `Overlay Routing: False`.
+Expected: `GWLB enabled: True`, `Overlay Routing: False`.
 
-> Overlay routing bisa menyala lagi setelah push dari SCM kalau opsi **Enable Overlay Routing** tercentang di deployment workflow SCM. Overlay hanya untuk desain dua kaki (egress lewat `eth1/2`). Cek lagi setiap selesai push.
+> Overlay routing can turn back on after an SCM push if **Enable Overlay Routing** is checked in the SCM deployment workflow. Overlay routing is only for two-arm designs (egress through `eth1/2`). Check again after every push.
 
-### 6.4 Subinterface per GWLB endpoint (eksperimen)
+### 6.4 Subinterface per GWLB endpoint (experiment)
 
-Langkah yang dicoba:
+Steps tried:
 
-1. Subinterface `ethernet1/1.10`: tag 10, zone `eks-sub` (contoh), LR `default`, **IPv4 static dummy** `100.64.10.1/30` (DHCP tidak dapat IP karena AWS tidak melayani VLAN).
-2. Asosiasi endpoint (pakai ID endpoint `vpce-...`, bukan `vpce-svc-...`):
+1. Subinterface `ethernet1/1.10`: tag 10, zone `eks-sub` (example), LR `default`, **static dummy IPv4** `100.64.10.1/30` (DHCP gets no address because AWS does not serve VLANs).
+2. Endpoint association (use the endpoint ID `vpce-...`, not `vpce-svc-...`):
 
 ```
 request plugins vm_series aws gwlb associate vpc-endpoint <VPCE_ID> interface ethernet1/1.10
@@ -259,16 +259,16 @@ request plugins vm_series aws gwlb associate vpc-endpoint <VPCE_ID> interface et
 show plugins vm_series aws gwlb
 ```
 
-Hasil:
+Result:
 
-| Sumber trafik lewat GWLBE yang sama | Zone di firewall |
+| Traffic source through the same GWLBE | Zone on the firewall |
 |---|---|
-| EC2 biasa, dirutekan ke GWLBE lewat route table (`gwlb-test.tf`) | **`eks-sub`** (`ethernet1/1.10`) |
-| Pod EKS lewat PAN CNI (menembak IP GWLBE langsung) | **`LAN`** (`ethernet1/1`) |
+| Regular EC2, routed to the GWLBE by route table (`gwlb-test.tf`) | **`eks-sub`** (`ethernet1/1.10`) |
+| EKS pods through PAN CNI (sending directly to the GWLBE IP) | **`LAN`** (`ethernet1/1`) |
 
-Kesimpulan: asosiasi vpce → subinterface **bekerja untuk trafik GWLB biasa, tapi tidak diterapkan ke trafik PAN CNI** (counter `flow_rcv_geneve_fast_decap` / `flow_fwaas_*`, tidak ada counter vpce). Segmentasi trafik Kubernetes dilakukan dengan DAG (bagian 9). Sudah dieskalasi ke PANW.
+Conclusion: vpce → subinterface association **works for regular GWLB traffic but is not applied to PAN CNI traffic** (counters `flow_rcv_geneve_fast_decap` / `flow_fwaas_*`, no vpce counters). Kubernetes traffic is segmented with DAGs instead (section 9). Escalated to PANW.
 
-Untuk menghapus subinterface: disassociate dulu, lepas `$LAN.10` dari Virtual Router, Logical Router, dan zone, baru hapus interface-nya, lalu push.
+To remove the subinterface: disassociate first, remove `$LAN.10` from the Virtual Router, Logical Router, and zone, then delete the interface and push.
 
 ```
 request plugins vm_series aws gwlb disassociate vpc-endpoint <VPCE_ID> interface ethernet1/1.10
@@ -276,9 +276,9 @@ request plugins vm_series aws gwlb disassociate vpc-endpoint <VPCE_ID> interface
 
 ---
 
-## 7. PAN CNI dan uji trafik
+## 7. PAN CNI and traffic tests
 
-### 7.1 Validasi PAN CNI
+### 7.1 Validate PAN CNI
 
 ```bash
 kubectl get pods -n kube-system -l k8s-app=pan-cni -o wide
@@ -292,14 +292,14 @@ kubectl get endpointslices -n kube-system | grep pan
 helm get values ai-runtime-security -n kube-system
 ```
 
-`endpoints` harus `10.20.252.4` (GWLBE). Value chart diatur di `pan-cni.tf`; jangan edit `charts/ai-runtime-security/values.yaml`. Kalau memasang manual dengan Helm, set `install_pan_cni = false` supaya tidak bentrok dengan Terraform:
+`endpoints` must be `10.20.252.4` (GWLBE). Chart values are set in `pan-cni.tf`; do not edit `charts/ai-runtime-security/values.yaml`. If you install manually with Helm, set `install_pan_cni = false` so it does not conflict with Terraform:
 
 ```bash
 helm upgrade --install ai-runtime-security ./charts/ai-runtime-security -n kube-system \
   --set endpoints=10.20.252.4 --set fwtrustcidr=10.20.250.0/28 --set clusterid=1 --set deployTo=eks
 ```
 
-### 7.2 Deploy demo
+### 7.2 Deploy the demo
 
 ```bash
 kubectl apply -f k8s/airs-demo-all.yaml
@@ -313,53 +313,53 @@ kubectl get pods -n airs-demo -o wide
 kubectl get pods -n airs-demo-b -o wide
 ```
 
-### 7.3 Uji
+### 7.3 Test
 
 ```bash
 bash k8s/test.sh
 ```
 
-Hasil yang diharapkan: `Ringkasan: 15 PASS, 0 FAIL` (namespace sama dan beda, ClusterIP / headless / IP pod, termasuk lintas node).
+Expected result: `Ringkasan: 15 PASS, 0 FAIL` (same and different namespace, ClusterIP / headless / pod IP, including cross-node).
 
-Bukti trafik lewat firewall:
+Evidence that traffic goes through the firewall:
 
-- Traffic log: `( port.dst eq 80 )` untuk web, `( port.dst eq 81 )` untuk web2
-- CLI firewall: `show session all filter destination-port 81`
-- Trafik GENEVE: `show counter global filter delta yes` (`flow_rcv_geneve_fast_decap` = `flow_tx_geneve_encap`)
+- Traffic log: `( port.dst eq 80 )` for web, `( port.dst eq 81 )` for web2
+- Firewall CLI: `show session all filter destination-port 81`
+- GENEVE traffic: `show counter global filter delta yes` (`flow_rcv_geneve_fast_decap` = `flow_tx_geneve_encap`)
 
 ---
 
 ## 8. IP-Tag Collector
 
-Tag collector adalah VM dengan **AMI yang sama dengan firewall**, berjalan dalam mode tag collector (`plugin-op-commands=tag_collector_mode_flag:enable`, `tplname=otid:<OTID>;label:CtxColl`). Ia membaca pod/namespace/service dari EKS dan membagikan IP-tag ke firewall lewat User-ID redistribution (port 5007).
+The tag collector is a VM with the **same AMI as the firewall**, running in tag collector mode (`plugin-op-commands=tag_collector_mode_flag:enable`, `tplname=otid:<OTID>;label:CtxColl`). It reads pods/namespaces/services from EKS and shares IP-tags with the firewall through User-ID redistribution (port 5007).
 
-### 8.1 Adaptasi dari template SCM
+### 8.1 Adapted from the SCM template
 
-| Template SCM | Di project ini |
+| SCM template | In this project |
 |---|---|
-| `tgw_project` (Transit Gateway) | **Tidak dipakai**. Tag collector satu VPC dengan EKS |
-| `tc_project`: VPC baru `10.20.0.0/16`, IP `10.20.0.14` | Subnet mgmt yang ada, `10.20.251.11` + EIP (VPC template akan overlap) |
-| `tc_project`: SG 443/22 dari `0.0.0.0/0` | Dibatasi ke `admin_cidrs`; tambah 5007 dari SG mgmt firewall |
-| `tc_iam_project`: `private_cluster_role` + `k8s-policy` | Sama (nama dipertahankan), plus EKS access entry `AmazonEKSViewPolicy` |
-| (tidak ada) | Rule SG cluster EKS: 443 dari tag collector |
+| `tgw_project` (Transit Gateway) | **Not used**. The tag collector is in the same VPC as EKS |
+| `tc_project`: new VPC `10.20.0.0/16`, IP `10.20.0.14` | Existing mgmt subnet, `10.20.251.11` + EIP (the template VPC would overlap) |
+| `tc_project`: SG 443/22 from `0.0.0.0/0` | Restricted to `admin_cidrs`; 5007 added from the firewall mgmt SG |
+| `tc_iam_project`: `private_cluster_role` + `k8s-policy` | Same (names kept), plus EKS access entries with `AmazonEKSViewPolicy` |
+| (none) | EKS cluster SG rule: 443 from the tag collector |
 
-### 8.2 Nilai bootstrap
+### 8.2 Bootstrap values
 
 ```bash
 cp tag-collector.auto.tfvars.example tag-collector.auto.tfvars
 ```
 
-Isi `tc_bootstrap_options` dan `tc_instance_role_name` dari template SCM (`tc_project/terraform.tfvars` dan `tc_iam_project/terraform.tfvars`). File ini di-ignore git.
+Fill in `tc_bootstrap_options` and `tc_instance_role_name` from the SCM template (`tc_project/terraform.tfvars` and `tc_iam_project/terraform.tfvars`). Git ignores this file.
 
-**Jangan diganti** (spesifik tenant): `tsg-id` (`<TSG_ID>`), `tplname`, `dgname`, `discovery-account-id` (`<DISCOVERY_ACCOUNT_ID>`), `cluster-account-ids` (memetakan ke `<ACCOUNT_ID>`), `ip-tag-svc-endpoint`, `cdl-region`.
+**Do not change** (tenant-specific): `tsg-id` (`<TSG_ID>`), `tplname`, `dgname`, `discovery-account-id` (`<DISCOVERY_ACCOUNT_ID>`), `cluster-account-ids` (maps to `<ACCOUNT_ID>`), `ip-tag-svc-endpoint`, `cdl-region`.
 
-**Wajib diganti** (template mengisinya dengan placeholder huruf berulang):
+**Must replace** (the template fills them with repeated-letter placeholders):
 
 - `authcodes`
-- `vm-series-auto-registration-pin-id` (UUID 36 karakter)
+- `vm-series-auto-registration-pin-id` (36-character UUID)
 - `vm-series-auto-registration-pin-value`
 
-`vm-auth-key` boleh kosong. `tplname` mengandung `;`, jadi user_data tag collector dipisah baris baru.
+`vm-auth-key` can stay empty. `tplname` contains `;`, so the tag collector user_data is newline-separated.
 
 ### 8.3 Deploy
 
@@ -379,21 +379,21 @@ terraform apply -var enable_tag_collector=true
 terraform output tag_collector_mgmt_public_ip
 ```
 
-Tunggu 10–15 menit, lalu:
+Wait 10–15 minutes, then:
 
 ```bash
 ssh -i <key>.pem admin@<TC_MGMT_EIP>
 ```
 
-Kalau nilai bootstrap salah, perbaiki tfvars lalu buat ulang VM:
+If a bootstrap value was wrong, fix the tfvars and recreate the VM:
 
 ```bash
 terraform apply -var enable_tag_collector=true -replace='aws_instance.tc[0]'
 ```
 
-### 8.4 ServiceAccount dan kredensial
+### 8.4 ServiceAccount and credentials
 
-Kredensial cluster **harus token ServiceAccount Kubernetes** (lihat 10.2).
+Cluster credentials **must be a Kubernetes ServiceAccount token** (see 10.2).
 
 ```bash
 kubectl apply -f k8s/tag-collector-serviceaccount.yaml
@@ -409,23 +409,23 @@ gzip -c cred.json | base64 | tr -d '\n' | pbcopy
 rm cred.json
 ```
 
-Manifest ini adalah `charts/ai-runtime-security/plugin-serviceaccount.yaml` dari PANW (tidak dipasang oleh Helm karena di luar `templates/`) ditambah izin read-only:
+This manifest is PANW's `charts/ai-runtime-security/plugin-serviceaccount.yaml` (not installed by Helm because it sits outside `templates/`) plus read-only permissions:
 
-| Izin tambahan | Gejala kalau tidak ada |
+| Extra permission | Symptom without it |
 |---|---|
 | `serviceaccounts`, `namespaces`: get/list/watch | Polling `Failed to get service accounts. Invalid permissions.` |
-| `nodes`, `endpoints`: get/watch | Watching tertahan `Initializing`, counter `node_cred_err` / `endpoint_cred_err` naik |
+| `nodes`, `endpoints`: get/watch | Watching stuck at `Initializing`, counters `node_cred_err` / `endpoint_cred_err` keep increasing |
 
-Hostname endpoint EKS (tanpa `https://`):
+EKS endpoint hostname (without `https://`):
 
 ```bash
 aws eks describe-cluster --name airs-eks --region ap-southeast-3 \
   --query cluster.endpoint --output text | sed 's#https://##'
 ```
 
-### 8.5 Daftarkan cluster (CLI tag collector)
+### 8.5 Register the cluster (tag collector CLI)
 
-Satu atribut per baris (versi satu baris dari dokumentasi menghasilkan `Invalid syntax`):
+One attribute per line (the one-line version from the docs returns `Invalid syntax`):
 
 ```
 configure
@@ -439,12 +439,12 @@ commit
 exit
 ```
 
-| Placeholder | Arti | Saran nama | Contoh di lab ini |
+| Placeholder | Meaning | Suggested name | Example in this lab |
 |---|---|---|---|
-| `<cluster_name>` | Nama entri kredensial cluster di tag collector | **Samakan dengan nama cluster EKS aslinya** (variabel Terraform `name`, yang dipakai di `aws eks ... --name`) supaya mudah dicocokkan | `airs-eks` |
-| `<mon_def_name>` | Monitoring definition, yaitu definisi pemantauan tag collector ke cluster EKS tersebut (satu per cluster). Namanya bebas | `<cluster_name>-mon` | `airs-eks-mon` |
-| `<EKS_ENDPOINT_HOST>` | Hostname API server EKS tanpa `https://`. Ini yang menentukan cluster mana yang dibaca | dari `aws eks describe-cluster` | |
-| `<BASE64>` | `cred.json` (secret SA) yang di-gzip lalu base64 | dari langkah 8.4 | |
+| `<cluster_name>` | Name of the cluster credential entry on the tag collector | **Use the real EKS cluster name** (Terraform variable `name`, the one used in `aws eks ... --name`) so it is easy to match | `airs-eks` |
+| `<mon_def_name>` | Monitoring definition, i.e. the tag collector's monitoring definition for that EKS cluster (one per cluster). Any name works | `<cluster_name>-mon` | `airs-eks-mon` |
+| `<EKS_ENDPOINT_HOST>` | EKS API server hostname without `https://`. This decides which cluster is read | from `aws eks describe-cluster` | |
+| `<BASE64>` | `cred.json` (SA secret), gzipped then base64-encoded | from step 8.4 | |
 
 ```
 show plugins kubernetes status
@@ -454,9 +454,9 @@ show plugins kubernetes status
 show plugins kubernetes counters
 ```
 
-Target: Polling dan Watching `Connected`, `*_cred_err` tidak terus naik.
+Target: Polling and Watching `Connected`, `*_cred_err` not increasing.
 
-Paksa polling ulang (setelah RBAC diperbaiki):
+Force a new poll (after fixing RBAC):
 
 ```
 configure
@@ -466,7 +466,7 @@ set deviceconfig plugins kubernetes monitoring-definition <mon_def_name> enable 
 commit
 ```
 
-Tes token dari laptop (`200` boleh, `403` RBAC kurang, `401` token ditolak):
+Test the token from your laptop (`200` allowed, `403` RBAC missing, `401` token rejected):
 
 ```bash
 EP=$(aws eks describe-cluster --name airs-eks --region ap-southeast-3 --query cluster.endpoint --output text)
@@ -477,132 +477,132 @@ done
 unset TOKEN
 ```
 
-> Kalau cluster dibuat ulang, hostname dan token berubah: apply ulang ServiceAccount, buat ulang `cred.json`, dan update kredensial di tag collector.
+> If the cluster is recreated, the hostname and token change: re-apply the ServiceAccount, rebuild `cred.json`, and update the credentials on the tag collector.
 
-### 8.6 Redistribution ke firewall (SCM)
+### 8.6 Redistribution to the firewall (SCM)
 
 **Identity Services → Identity Redistribution → Add Agent**, scope `AIRS-EKS-Jakarta`:
 
-| Field | Isi |
+| Field | Value |
 |---|---|
 | Name | `airs-eks-tag-collector` |
-| Enabled | ya |
+| Enabled | yes |
 | Host | `10.20.251.11` |
 | Port | `5007` |
 | Data Type | **IP to Tag** |
-| Collector Name / Pre-Shared Key | kosong (PoC) |
+| Collector Name / Pre-Shared Key | empty (PoC) |
 
-Push Config. Cek di tag collector:
+Push Config. Check on the tag collector:
 
 ```
 show redistribution service client all
 ```
 
-Hasil yang benar: `10.20.251.10/<port>  ...  T` (firewall sebagai client IP-tag).
+Expected: `10.20.251.10/<port>  ...  T` (the firewall as an IP-tag client).
 
-Kalau kosong: cek `show user user-id-agent state all` di firewall, dan aktifkan layanan User-ID di mgmt tag collector (`set deviceconfig system service disable-userid-service no`, cek nama opsi dengan `?`).
+If empty: check `show user user-id-agent state all` on the firewall, and enable the User-ID service on the tag collector mgmt interface (`set deviceconfig system service disable-userid-service no`; check the option name with `?`).
 
-### 8.7 Verifikasi tag di firewall
+### 8.7 Verify tags on the firewall
 
 ```
 show object registered-ip all
 ```
 
-IP pod harus muncul dengan tag `k8s.*`.
+Pod IPs must appear with `k8s.*` tags.
 
 ---
 
-## 9. Dynamic Address Group (DAG)
+## 9. Dynamic Address Groups (DAG)
 
 SCM → **Objects → Address → Address Groups → Add**, scope `AIRS-EKS-Jakarta`:
 
 1. Name `dag-ns-airs-demo`, Type **Dynamic**
-2. **Edit Match Criteria → tab CIE**, cari `airs-demo`, pilih tag namespace (bukan label `k8s.app.*`)
-3. Ulangi untuk `dag-ns-airs-demo-b`
+2. **Edit Match Criteria → CIE tab**, search `airs-demo`, pick the namespace tag (not the `k8s.app.*` labels)
+3. Repeat for `dag-ns-airs-demo-b`
 4. Push Config
 
 ```
 show object dynamic-address-group all
 ```
 
-DAG hanya object. Pemakaian di security rule (misalnya `airs-demo → airs-demo-b` port 81 allow) adalah perubahan policy terpisah. Session lewat ClusterIP juga dicatat ke IP Service, jadi sertakan tag Service (`k8s.svc*`) bila perlu.
+A DAG is only an object. Using it in a security rule (for example `airs-demo → airs-demo-b` port 81 allow) is a separate policy change. Sessions through a ClusterIP are also logged against the Service IP, so include the Service tag (`k8s.svc*`) when needed.
 
 ---
 
-## 10. Temuan dan batasan
+## 10. Findings and limitations
 
-### 10.1 Subinterface/zone untuk trafik PAN CNI
+### 10.1 Subinterface/zone for PAN CNI traffic
 
-Asosiasi GWLB endpoint → subinterface tidak berlaku untuk trafik PAN CNI (lihat 6.4). Semua trafik pod masuk zone parent (`LAN`). Segmentasi dilakukan per tag (DAG), bukan per zone.
+GWLB endpoint → subinterface association does not apply to PAN CNI traffic (see 6.4). All pod traffic lands in the parent zone (`LAN`). Segmentation is done per tag (DAG), not per zone.
 
-### 10.2 IAM role untuk tag collector
+### 10.2 IAM role for the tag collector
 
-Yang sudah dicoba dan **ditolak** oleh plugin Kubernetes tag collector (PAN-OS 12.2.3):
+Tried and **rejected** by the tag collector Kubernetes plugin (PAN-OS 12.2.3):
 
-| Kredensial | Hasil |
+| Credential | Result |
 |---|---|
-| File AWS `role_arn` + `credential_source=Ec2InstanceMetadata` (base64) | `File should be json containing Token and CA cert.` |
-| File AWS berisi kredensial STS dari `private_cluster_role` | Ditolak, pesan sama |
-| JSON berbentuk secret berisi token EKS hasil IAM (`aws eks get-token`) | Ditolak, pesan sama |
+| AWS file with `role_arn` + `credential_source=Ec2InstanceMetadata` (base64) | `File should be json containing Token and CA cert.` |
+| AWS file with STS credentials from `private_cluster_role` | Rejected, same message |
+| Secret-shaped JSON with an IAM-generated EKS token (`aws eks get-token`) | Rejected, same message |
 
-CLI hanya menawarkan `service-account-cred` dan `service-account-json`, dan `scp import` hanya punya tipe `k8s-service-account`. `private_cluster_role` tidak pernah di-assume (CloudTrail). Jadi **token ServiceAccount adalah satu-satunya jalur yang jalan**. Pertanyaan pemakaian `private_cluster_role` sudah diajukan ke PANW.
+The CLI only offers `service-account-cred` and `service-account-json`, and `scp import` only has the `k8s-service-account` type. `private_cluster_role` was never assumed (CloudTrail). So **the ServiceAccount token is the only working path**. The question of how `private_cluster_role` is meant to be used has been raised with PANW.
 
-### 10.3 Lain-lain
+### 10.3 Other
 
-- Firewall tunggal di AZ-a: node AZ-b melintas AZ (biaya dan latensi). Untuk HA, tambah firewall per AZ di target group GWLB.
-- Fargate tidak tercakup (PAN CNI berupa DaemonSet).
-- Konfigurasi DLP dari SCM (`PII Basic Block All Data` → `DLP App Exclusion`) memunculkan error validasi di tag collector. Perbaiki di SCM bila commit tag collector gagal.
+- Single firewall in AZ-a: AZ-b nodes cross AZs (cost and latency). For HA, add a firewall per AZ to the GWLB target group.
+- Fargate is not covered (PAN CNI is a DaemonSet).
+- DLP configuration from SCM (`PII Basic Block All Data` → `DLP App Exclusion`) causes a validation error on the tag collector. Fix it in SCM if tag collector commits fail.
 
 ---
 
 ## 11. Troubleshooting
 
-| Gejala | Cek |
+| Symptom | Check |
 |---|---|
-| `plan` gagal di `data.aws_ami.fw` | AMI tidak ada di region / Marketplace belum subscribe |
-| Firewall tidak muncul di SCM | `dgname`, auth code/PIN, akses internet mgmt (EIP, route ke IGW) |
-| Helm/kubectl timeout ke EKS API | IP publik Anda tidak ada di `eks_public_access_cidrs` |
-| Pod lintas node gagal | Rule SG node `ingress_self_all` |
-| Target group GWLB unhealthy | Mgmt profile HTTPS belum terpasang di `ethernet1/1` |
-| Trafik ke GWLB tapi tidak ada balasan | `request plugins vm_series aws gwlb inspect enable yes` |
-| Overlay routing `True` lagi setelah push | Opsi overlay di SCM, matikan lagi (6.3) |
-| `associate ... should be less than or equal to 22 characters` | Pakai ID endpoint `vpce-...`, bukan `vpce-svc-...` |
-| Hapus subinterface ditolak `references from ... virtual-router` | Lepas dari Virtual Router, Logical Router, zone dulu |
-| Tag collector `Invalid permissions` | RBAC ServiceAccount (8.4), tes dengan `curl` |
-| Watching `Initializing` terus | Izin `watch` nodes/endpoints, cek `show plugins kubernetes counters` |
-| Redistribution client kosong | SG 5007, agent di SCM sudah di-push, layanan User-ID tag collector |
-| Commit tag collector gagal setelah tes | Hapus entri candidate yang gagal (`delete ...`) lalu commit |
+| `plan` fails at `data.aws_ami.fw` | AMI not in the region / Marketplace not subscribed |
+| Firewall does not appear in SCM | `dgname`, auth code/PIN, mgmt internet access (EIP, route to IGW) |
+| Helm/kubectl timeout to the EKS API | Your public IP is not in `eks_public_access_cidrs` |
+| Cross-node pod traffic fails | Node SG rule `ingress_self_all` |
+| GWLB target group unhealthy | HTTPS mgmt profile not attached to `ethernet1/1` |
+| Traffic reaches the GWLB but no replies | `request plugins vm_series aws gwlb inspect enable yes` |
+| Overlay routing `True` again after a push | Overlay option in SCM, turn it off again (6.3) |
+| `associate ... should be less than or equal to 22 characters` | Use the endpoint ID `vpce-...`, not `vpce-svc-...` |
+| Deleting a subinterface fails with `references from ... virtual-router` | Remove it from the Virtual Router, Logical Router, and zone first |
+| Tag collector `Invalid permissions` | ServiceAccount RBAC (8.4), test with `curl` |
+| Watching stays `Initializing` | `watch` on nodes/endpoints, check `show plugins kubernetes counters` |
+| Redistribution client list empty | SG 5007, agent pushed from SCM, User-ID service on the tag collector |
+| Tag collector commit fails after a test | Delete the failed candidate entries (`delete ...`) and commit |
 
 ---
 
-## 12. Hapus / rollback
+## 12. Teardown / rollback
 
-Matikan inspeksi satu namespace:
+Stop inspection for one namespace:
 
 ```bash
 kubectl annotate namespace airs-demo paloaltonetworks.com/firewall-
 kubectl rollout restart deployment -n airs-demo
 ```
 
-Hapus tag collector:
+Remove the tag collector:
 
 ```bash
 kubectl delete -f k8s/tag-collector-serviceaccount.yaml
 terraform apply
 ```
 
-Hapus semua (workload dulu, baru infrastruktur):
+Remove everything (workloads first, then infrastructure):
 
 ```bash
 kubectl delete -f k8s/airs-demo-all.yaml
 terraform destroy
 ```
 
-Setelah destroy, deactivate lisensi firewall dan tag collector di SCM/CSP.
+After destroying, deactivate the firewall and tag collector licenses in SCM/CSP.
 
 ---
 
-## 13. Referensi
+## 13. References
 
 - Basics of Container Security (CNI chaining): https://docs.paloaltonetworks.com/prisma-airs/ai-runtime-security/airs-vm-firewall/microperimeter/cni-chaining-concept-overview
 - Secure VMs and Kubernetes Clusters in AWS (SCM): https://docs.paloaltonetworks.com/prisma-airs/ai-inventory/scm-config-protect-vms-k8s-aws
@@ -611,6 +611,6 @@ Setelah destroy, deactivate lisensi firewall dan tag collector di SCM/CSP.
 - AWS Onboarding Prerequisites: https://docs.paloaltonetworks.com/prisma-airs/ai-inventory/cloud-resource-discovery/onboard-and-activate-cloud-account-in-scm/aws-onboarding-prerequisites
 - Deploy a Tag Collector Agent on AWS: https://docs.paloaltonetworks.com/prisma-airs/ai-inventory/cloud-resource-discovery/private-cluster-discovery/deploy-a-tag-collector-agent-to-secure-private-clusters
 - Harvest IP-Tags from Kubernetes Clusters: https://docs.paloaltonetworks.com/prisma-airs/getting-started/use-case-harvesting-ip-tags-k8s-clusters
-- Service account untuk cluster authentication (CN-Series): https://docs.paloaltonetworks.com/cn-series/getting-started/cn-series-deployment-prereq/create-service-accounts-for-cluster-authentication-with-cn-series
+- Service accounts for cluster authentication (CN-Series): https://docs.paloaltonetworks.com/cn-series/getting-started/cn-series-deployment-prereq/create-service-accounts-for-cluster-authentication-with-cn-series
 - VM-Series bootstrap parameters: https://docs.paloaltonetworks.com/vm-series/getting-started/bootstrap-the-vm-series-firewall/create-bootstrap-configuration-files
 - Helm chart: https://github.com/PaloAltoNetworks/prisma-airs-helm
