@@ -529,7 +529,18 @@ A DAG is only an object. Using it in a security rule (for example `airs-demo →
 
 ### 9.1 Tag identifiers available
 
-Tags seen in `show object registered-ip all` on the firewall (25 registered addresses in this lab). Each object type has a short form and a cluster-qualified form. `<cluster>` is the cluster credential name set on the tag collector in 8.5 (`airs-eks`).
+Tags seen in `show object registered-ip all` (25 registered addresses in this lab; full output in 9.3). Each object type has a short form and a cluster-qualified form.
+
+`<cluster>` in the tags is the `<cluster_name>` of the cluster credential entry on the tag collector (8.5), not a value read from EKS. The tags say `cl_airs-eks` because the entry was created with `airs-eks` as `<cluster_name>`:
+
+```
+set deviceconfig plugins kubernetes setup cluster-credentials <cluster_name> api-server-address <EKS_ENDPOINT_HOST>
+set deviceconfig plugins kubernetes setup cluster-credentials <cluster_name> cluster-type EKS
+set deviceconfig plugins kubernetes setup cluster-credentials <cluster_name> cluster-credential-file service-account-cred <BASE64>
+set deviceconfig plugins kubernetes setup cluster-credentials <cluster_name> labels no-labels
+```
+
+A different `<cluster_name>` there would change every `k8s.cl_<cluster>...` tag, and any DAG matching the old name would go empty.
 
 | Object | Short form | Fully qualified form | Example in this lab |
 |---|---|---|---|
@@ -568,6 +579,247 @@ Notes for DAG match criteria:
 2. **Cluster qualification.** `k8s.ns_airs-demo` is the short form, so a namespace `airs-demo` in another monitored cluster also matches. The cluster-bound equivalent is `k8s.cl_airs-eks.ns_airs-demo`.
 
 Use the service tag as the destination for rules about access to the web application. Use the namespace tag for rules that apply to the whole namespace (for example limiting egress from `airs-demo`). Do not use the namespace tag as the destination of a "to web" rule, because the client pods would be allowed as destinations too.
+
+### 9.3 Full output of `show object registered-ip all`
+
+Taken on the tag collector (`10.20.251.11`). The firewall shows the same tags once redistribution works (8.7).
+
+```
+admin@ip-10-20-251-11> show object registered-ip all
+
+registered IP                             Tags
+----------------------------------------  -----------------
+
+10.20.10.120 #
+                                         "k8s.ds_aws-node (never expire)"
+                                         "k8s.ds_eks-pod-identity-agent (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.ds_kube-proxy (never expire)"
+                                         "k8s.ds_kube-proxy (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system (never expire)"
+                                         "k8s.cl_airs-eks (never expire)"
+                                         "k8s.ns_kube-system (never expire)"
+                                         "k8s.nodes (never expire)"
+                                         "k8s.cl_airs-eks.nodes (never expire)"
+                                         "k8s.ds_pan-cni (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.ds_pan-cni (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.ds_aws-node (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.ds_eks-pod-identity-agent (never expire)"
+
+172.20.0.1 #
+                                         "k8s.cl_airs-eks.ns_default.svc_kubernetes (never expire)"
+                                         "k8s.ns_default (never expire)"
+                                         "k8s.svc_kubernetes (never expire)"
+                                         "k8s.cl_airs-eks.ns_default (never expire)"
+
+172.20.60.163 #
+                                         "k8s.svc_web (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo.svc_web (never expire)"
+                                         "k8s.ns_airs-demo (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo (never expire)"
+
+10.20.0.246 #
+                                         "k8s.cl_airs-eks.ns_default.svc_kubernetes (never expire)"
+                                         "k8s.ns_default (never expire)"
+                                         "k8s.svc_kubernetes (never expire)"
+
+10.20.29.128 #
+                                         "k8s.cl_airs-eks.ns_airs-demo-b.svc_web2 (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo-b.rs_web2-6ddcbd6d8f (never expire)"
+                                         "k8s.svc_web2 (never expire)"
+                                         "k8s.cl_airs-eks (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo-b (never expire)"
+                                         "k8s.ns_airs-demo-b (never expire)"
+                                         "k8s.rs_web2-6ddcbd6d8f (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo-b.svc_web2-direct (never expire)"
+                                         "k8s.svc_web2-direct (never expire)"
+
+172.20.8.105 #
+                                         "k8s.cl_airs-eks.ns_kube-system (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.svc_eks-extension-metrics-api (never expire)"
+                                         "k8s.ns_kube-system (never expire)"
+                                         "k8s.svc_eks-extension-metrics-api (never expire)"
+
+10.20.4.11 #
+                                         "k8s.ds_aws-node (never expire)"
+                                         "k8s.ds_eks-pod-identity-agent (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.ds_kube-proxy (never expire)"
+                                         "k8s.ds_kube-proxy (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system (never expire)"
+                                         "k8s.cl_airs-eks (never expire)"
+                                         "k8s.ns_kube-system (never expire)"
+                                         "k8s.nodes (never expire)"
+                                         "k8s.cl_airs-eks.nodes (never expire)"
+                                         "k8s.ds_pan-cni (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.ds_pan-cni (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.ds_aws-node (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.ds_eks-pod-identity-agent (never expire)"
+
+10.20.2.108 #
+                                         "k8s.svc_web (never expire)"
+                                         "k8s.rs_web-5646769568 (never expire)"
+                                         "k8s.svc_web-direct (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo.svc_web (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo.svc_web-direct (never expire)"
+                                         "k8s.cl_airs-eks (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo.rs_web-5646769568 (never expire)"
+                                         "k8s.ns_airs-demo (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo (never expire)"
+
+10.20.15.11 #
+                                         "k8s.cl_airs-eks.ns_airs-demo-b.svc_web2 (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo-b.rs_web2-6ddcbd6d8f (never expire)"
+                                         "k8s.svc_web2 (never expire)"
+                                         "k8s.cl_airs-eks (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo-b (never expire)"
+                                         "k8s.ns_airs-demo-b (never expire)"
+                                         "k8s.rs_web2-6ddcbd6d8f (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo-b.svc_web2-direct (never expire)"
+                                         "k8s.svc_web2-direct (never expire)"
+
+172.0.32.0 #
+                                         "k8s.cl_airs-eks.ns_kube-system.svc_eks-extension-metrics-api (never expire)"
+                                         "k8s.ns_kube-system (never expire)"
+                                         "k8s.svc_eks-extension-metrics-api (never expire)"
+
+10.20.30.225 #
+                                         "k8s.svc_web (never expire)"
+                                         "k8s.rs_web-5646769568 (never expire)"
+                                         "k8s.svc_web-direct (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo.svc_web (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo.svc_web-direct (never expire)"
+                                         "k8s.cl_airs-eks (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo.rs_web-5646769568 (never expire)"
+                                         "k8s.ns_airs-demo (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo (never expire)"
+
+172.20.0.10 #
+                                         "k8s.cl_airs-eks.ns_kube-system (never expire)"
+                                         "k8s.ns_kube-system (never expire)"
+                                         "k8s.svc_kube-dns (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.svc_kube-dns (never expire)"
+
+10.20.20.112 #
+                                         "k8s.rs_client-695cfc84f4 (never expire)"
+                                         "k8s.cl_airs-eks (never expire)"
+                                         "k8s.ns_airs-demo (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo.rs_client-695cfc84f4 (never expire)"
+
+10.20.6.250 #
+                                         "k8s.rs_coredns-69fc576bc8 (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.rs_coredns-69fc576bc8 (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system (never expire)"
+                                         "k8s.cl_airs-eks (never expire)"
+                                         "k8s.ns_kube-system (never expire)"
+                                         "k8s.svc_kube-dns (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.svc_kube-dns (never expire)"
+
+10.20.29.160 #
+                                         "k8s.rs_coredns-69fc576bc8 (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.rs_coredns-69fc576bc8 (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system (never expire)"
+                                         "k8s.cl_airs-eks (never expire)"
+                                         "k8s.ns_kube-system (never expire)"
+                                         "k8s.svc_kube-dns (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.svc_kube-dns (never expire)"
+
+10.20.7.25 #
+                                         "k8s.svc_web (never expire)"
+                                         "k8s.rs_web-5646769568 (never expire)"
+                                         "k8s.svc_web-direct (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo.svc_web (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo.svc_web-direct (never expire)"
+                                         "k8s.cl_airs-eks (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo.rs_web-5646769568 (never expire)"
+                                         "k8s.ns_airs-demo (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo (never expire)"
+
+172.20.230.95 #
+                                         "k8s.cl_airs-eks.ns_airs-demo-b.svc_web2 (never expire)"
+                                         "k8s.svc_web2 (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo-b (never expire)"
+                                         "k8s.ns_airs-demo-b (never expire)"
+
+10.20.29.119 #
+                                         "k8s.rs_coredns-69fc576bc8 (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.rs_coredns-69fc576bc8 (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system (never expire)"
+                                         "k8s.cl_airs-eks (never expire)"
+                                         "k8s.ns_kube-system (never expire)"
+                                         "k8s.svc_kube-dns (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.svc_kube-dns (never expire)"
+
+10.20.28.139 #
+                                         "k8s.svc_web (never expire)"
+                                         "k8s.rs_web-5646769568 (never expire)"
+                                         "k8s.svc_web-direct (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo.svc_web (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo.svc_web-direct (never expire)"
+                                         "k8s.cl_airs-eks (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo.rs_web-5646769568 (never expire)"
+                                         "k8s.ns_airs-demo (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo (never expire)"
+
+10.20.0.193 #
+                                         "k8s.rs_coredns-69fc576bc8 (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.rs_coredns-69fc576bc8 (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system (never expire)"
+                                         "k8s.cl_airs-eks (never expire)"
+                                         "k8s.ns_kube-system (never expire)"
+                                         "k8s.svc_kube-dns (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.svc_kube-dns (never expire)"
+
+10.20.29.252 #
+                                         "k8s.cl_airs-eks.ns_default.svc_kubernetes (never expire)"
+                                         "k8s.ns_default (never expire)"
+                                         "k8s.svc_kubernetes (never expire)"
+
+10.20.27.15 #
+                                         "k8s.ds_aws-node (never expire)"
+                                         "k8s.ds_eks-pod-identity-agent (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.ds_kube-proxy (never expire)"
+                                         "k8s.ds_kube-proxy (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system (never expire)"
+                                         "k8s.cl_airs-eks (never expire)"
+                                         "k8s.ns_kube-system (never expire)"
+                                         "k8s.nodes (never expire)"
+                                         "k8s.cl_airs-eks.nodes (never expire)"
+                                         "k8s.ds_pan-cni (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.ds_pan-cni (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.ds_aws-node (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.ds_eks-pod-identity-agent (never expire)"
+
+10.20.3.66 #
+                                         "k8s.rs_client-695cfc84f4 (never expire)"
+                                         "k8s.cl_airs-eks (never expire)"
+                                         "k8s.ns_airs-demo (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo (never expire)"
+                                         "k8s.cl_airs-eks.ns_airs-demo.rs_client-695cfc84f4 (never expire)"
+
+10.20.30.1 #
+                                         "k8s.ds_aws-node (never expire)"
+                                         "k8s.ds_eks-pod-identity-agent (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.ds_kube-proxy (never expire)"
+                                         "k8s.ds_kube-proxy (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system (never expire)"
+                                         "k8s.cl_airs-eks (never expire)"
+                                         "k8s.ns_kube-system (never expire)"
+                                         "k8s.nodes (never expire)"
+                                         "k8s.cl_airs-eks.nodes (never expire)"
+                                         "k8s.ds_pan-cni (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.ds_pan-cni (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.ds_aws-node (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system.ds_eks-pod-identity-agent (never expire)"
+
+172.20.86.54 #
+                                         "k8s.cl_airs-eks.ns_kube-system.svc_pan-ngfw-svc (never expire)"
+                                         "k8s.cl_airs-eks.ns_kube-system (never expire)"
+                                         "k8s.ns_kube-system (never expire)"
+                                         "k8s.svc_pan-ngfw-svc (never expire)"
+
+Total: 25 registered addresses
+*: received from user-id agent  #: persistent  +: received from cloud
+```
 
 ---
 
