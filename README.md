@@ -908,3 +908,5 @@ After destroying, deactivate the firewall and tag collector licenses in SCM/CSP.
 - Service accounts for cluster authentication (CN-Series): https://docs.paloaltonetworks.com/cn-series/getting-started/cn-series-deployment-prereq/create-service-accounts-for-cluster-authentication-with-cn-series
 - VM-Series bootstrap parameters: https://docs.paloaltonetworks.com/vm-series/getting-started/bootstrap-the-vm-series-firewall/create-bootstrap-configuration-files
 - Helm chart: https://github.com/PaloAltoNetworks/prisma-airs-helm
+
+Tested by: [Rifky Ardiansyah](https://www.linkedin.com/in/rifkyardiansyah/)
