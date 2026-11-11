@@ -527,6 +527,48 @@ show object dynamic-address-group all
 
 A DAG is only an object. Using it in a security rule (for example `airs-demo → airs-demo-b` port 81 allow) is a separate policy change. Sessions through a ClusterIP are also logged against the Service IP, so include the Service tag (`k8s.svc*`) when needed.
 
+### 9.1 Tag identifiers available
+
+Tags seen in `show object registered-ip all` on the firewall (25 registered addresses in this lab). Each object type has a short form and a cluster-qualified form. `<cluster>` is the cluster credential name set on the tag collector in 8.5 (`airs-eks`).
+
+| Object | Short form | Fully qualified form | Example in this lab |
+|---|---|---|---|
+| Cluster | `k8s.cl_<cluster>` | (same) | `k8s.cl_airs-eks` |
+| Nodes | `k8s.nodes` | `k8s.cl_<cluster>.nodes` | `k8s.cl_airs-eks.nodes` |
+| Namespace | `k8s.ns_<namespace>` | `k8s.cl_<cluster>.ns_<namespace>` | `k8s.cl_airs-eks.ns_airs-demo` |
+| Service | `k8s.svc_<service>` | `k8s.cl_<cluster>.ns_<namespace>.svc_<service>` | `k8s.cl_airs-eks.ns_airs-demo.svc_web` |
+| ReplicaSet | `k8s.rs_<replicaset>` | `k8s.cl_<cluster>.ns_<namespace>.rs_<replicaset>` | `k8s.cl_airs-eks.ns_airs-demo.rs_client-695cfc84f4` |
+| DaemonSet | `k8s.ds_<daemonset>` | `k8s.cl_<cluster>.ns_<namespace>.ds_<daemonset>` | `k8s.cl_airs-eks.ns_kube-system.ds_kube-proxy` |
+
+Notes for DAG match criteria:
+
+- **Prefer the fully qualified form.** `k8s.svc_web` matches a service named `web` in any namespace or cluster the tag collector monitors. `k8s.cl_airs-eks.ns_airs-demo.svc_web` matches only that one.
+- **A service tag covers the ClusterIP and the backing pods.** `svc_web` is on `172.20.60.163` (ClusterIP) and on the four web pods.
+- **A namespace tag covers everything in the namespace**: all pods plus the Service ClusterIPs.
+- **`k8s.cl_<cluster>` alone is only on pods and nodes.** Service ClusterIPs (`172.20.x.x`) do not carry it.
+- **ReplicaSet tags are not stable.** The suffix (`695cfc84f4`) is the pod-template hash and changes when the Deployment is updated, which empties the DAG.
+- **Pods without a Service have no service tag.** The `client` pods only carry the namespace and `rs_client-<hash>` tags. For a stable identifier, create a Service that selects them so they get a `svc_client` tag.
+- **No label tags.** The cluster is registered with `labels no-labels` (8.5), so only the object types above are produced.
+
+### 9.2 Namespace tag vs service tag
+
+`k8s.ns_airs-demo` and `k8s.cl_airs-eks.ns_airs-demo.svc_web` differ in scope:
+
+| IP | What | `k8s.ns_airs-demo` | `k8s.cl_airs-eks.ns_airs-demo.svc_web` |
+|---|---|---|---|
+| `172.20.60.163` | ClusterIP of service `web` | ✓ | ✓ |
+| `10.20.2.108` | web pod | ✓ | ✓ |
+| `10.20.30.225` | web pod | ✓ | ✓ |
+| `10.20.7.25` | web pod | ✓ | ✓ |
+| `10.20.28.139` | web pod | ✓ | ✓ |
+| `10.20.20.112` | client pod | ✓ | ✗ |
+| `10.20.3.66` | client pod | ✓ | ✗ |
+
+1. **Object level.** The namespace tag holds 7 IPs (web + client), the service tag 5 (the `web` ClusterIP and its pods). A new workload in `airs-demo` joins the namespace tag automatically, but not `svc_web`.
+2. **Cluster qualification.** `k8s.ns_airs-demo` is the short form, so a namespace `airs-demo` in another monitored cluster also matches. The cluster-bound equivalent is `k8s.cl_airs-eks.ns_airs-demo`.
+
+Use the service tag as the destination for rules about access to the web application. Use the namespace tag for rules that apply to the whole namespace (for example limiting egress from `airs-demo`). Do not use the namespace tag as the destination of a "to web" rule, because the client pods would be allowed as destinations too.
+
 ---
 
 ## 10. Findings and limitations
