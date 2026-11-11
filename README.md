@@ -909,4 +909,6 @@ After destroying, deactivate the firewall and tag collector licenses in SCM/CSP.
 - VM-Series bootstrap parameters: https://docs.paloaltonetworks.com/vm-series/getting-started/bootstrap-the-vm-series-firewall/create-bootstrap-configuration-files
 - Helm chart: https://github.com/PaloAltoNetworks/prisma-airs-helm
 
+---
+
 Tested by: [Rifky Ardiansyah](https://www.linkedin.com/in/rifkyardiansyah/)
